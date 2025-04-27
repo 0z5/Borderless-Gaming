@@ -7,53 +7,50 @@ on:
     branches: [ "master" ]
 
 jobs:
-
   build:
-
     strategy:
       matrix:
         configuration: [Release]
 
-    runs-on: windows-latest  # For a list of available runner types, refer to
-                             # https://help.github.com/en/actions/reference/workflow-syntax-for-github-actions#jobsjob_idruns-on
+    runs-on: windows-latest
 
     env:
-      Solution_Name: BorderlessGaming.sln                      # Solution name
-      Test_Project_Path: BorderlessGaming.Tests\BorderlessGaming.Tests.csproj # Test project path
-      Wap_Project_Directory: BorderlessGaming.Package           # WAP project directory
-      Wap_Project_Path: BorderlessGaming.Package\BorderlessGaming.Package.wapproj # WAP project path
+      Solution_Name: BorderlessGaming.sln
+      Test_Project_Path: BorderlessGaming.Tests\BorderlessGaming.Tests.csproj
+      Wap_Project_Directory: BorderlessGaming.Package
+      Wap_Project_Path: BorderlessGaming.Package\BorderlessGaming.Package.wapproj
 
     steps:
-    - name: Checkout
+    - name: Checkout code
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
 
-    # Install the .NET Core workload
-    - name: Install .NET Core
+    # Install .NET Core
+    - name: Install .NET Core SDK
       uses: actions/setup-dotnet@v4
       with:
         dotnet-version: 8.0.x
 
-    # Add  MSBuild to the PATH: https://github.com/microsoft/setup-msbuild
-    - name: Setup MSBuild.exe
+    # Set up MSBuild
+    - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v2
 
-    # Execute all unit tests in the solution
-    - name: Execute unit tests
+    # Run unit tests
+    - name: Run unit tests
       run: dotnet test
 
-    # Restore the application to populate the obj folder with RuntimeIdentifiers
+    # Restore the application (this step ensures the obj folder is populated)
     - name: Restore the application
       run: msbuild $env:Solution_Name /t:Restore /p:Configuration=$env:Configuration
       env:
         Configuration: ${{ matrix.configuration }}
 
-    # Decode the base 64 encoded pfx and save the Signing_Certificate
-    - name: Decode the pfx
+    # Decode the PFX certificate from base64
+    - name: Decode and save the pfx certificate
       run: |
         $pfx_cert_byte = [System.Convert]::FromBase64String("${{ secrets.Base64_Encoded_Pfx }}")
-        $certificateDirectory = Join-Path -Path $env:Wap_Project_Directory -ChildPath ""
+        $certificateDirectory = Join-Path -Path $env:Wap_Project_Directory -ChildPath "Certificates"
         
         # Create the directory if it doesn't exist
         if (-not (Test-Path -Path $certificateDirectory)) {
@@ -63,22 +60,21 @@ jobs:
         $certificatePath = Join-Path -Path $certificateDirectory -ChildPath "GitHubActionsWorkflow.pfx"
         [IO.File]::WriteAllBytes("$certificatePath", $pfx_cert_byte)
 
-
-    # Create the app package by building and packaging the Windows Application Packaging project
+    # Build and package the app
     - name: Create the app package
-      run: msbuild $env:Wap_Project_Path /p:Configuration=$env:Configuration /p:UapAppxPackageBuildMode=$env:Appx_Package_Build_Mode /p:AppxBundle=$env:Appx_Bundle /p:PackageCertificateKeyFile=GitHubActionsWorkflow.pfx /p:PackageCertificatePassword=${{ secrets.Pfx_Key }}
+      run: msbuild $env:Wap_Project_Path /p:Configuration=$env:Configuration /p:UapAppxPackageBuildMode=$env:Appx_Package_Build_Mode /p:AppxBundle=$env:Appx_Bundle /p:PackageCertificateKeyFile=$env:Wap_Project_Directory\Certificates\GitHubActionsWorkflow.pfx /p:PackageCertificatePassword=${{ secrets.Pfx_Key }}
       env:
         Appx_Bundle: Always
         Appx_Bundle_Platforms: x86|x64
         Appx_Package_Build_Mode: StoreUpload
         Configuration: ${{ matrix.configuration }}
 
-    # Remove the pfx
-    - name: Remove the pfx
-      run: Remove-Item -path $env:Wap_Project_Directory\GitHubActionsWorkflow.pfx
+    # Clean up the PFX file after the build
+    - name: Clean up the pfx certificate
+      run: Remove-Item -path $env:Wap_Project_Directory\Certificates\GitHubActionsWorkflow.pfx
 
-    # Upload the MSIX package: https://github.com/marketplace/actions/upload-a-build-artifact
-    - name: Upload build artifacts
+    # Upload the MSIX package
+    - name: Upload MSIX build artifact
       uses: actions/upload-artifact@v4
       with:
         name: MSIX Package
